@@ -7,6 +7,8 @@ SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/"
 COUNT_URL = "http://hk.centanet.com/findproperty/zh-HK/Service/GetBarChartAjax"
 COUNT_SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/"
 
+MIDLAND_URL = ""
+
 def get_page(page, posttype="S"):
     subparams = { "posttype" : posttype, "limit" : -1, "currentpage" : page }
     suffix_url = "%s?%s" % (SUFFIX_URL, urllib.parse.urlencode(subparams))
@@ -35,6 +37,12 @@ def get_pages(posttype="S"):
             continue
     return divs
 
-def get_midland_page(tx_type="S"):
-    params = { "estate_name" : "", "priceFrom" : None, "priceTo" : None, "areaFrom" : None, "areaTo" : None, "bedroom" : "", "tx_type" : "S", "area_type" : "net_area", "is_hos" : False, "autocompleteString" : "", "districtIds" : "", "estIds" : "", "latLngBounds" : "22.261965,113.92932,22.484834,114.290496" , "page" : page, "sort" : "", "bldgIds" : "", "feature" : "", "is_random" : False }
+def get_midland_page(page, tx_type="S"):
+    params = { "estate_name" : "", "priceFrom" : None, "priceTo" : None, "areaFrom" : None, "areaTo" : None, "bedroom" : "", "tx_type" : tx_type, "area_type" : "net_area", "is_hos" : False, "autocompleteString" : "", "districtIds" : "", "estIds" : "", "latLngBounds" : "22.261965,113.92932,22.484834,114.290496" , "page" : page, "sort" : "", "bldgIds" : "", "feature" : "", "is_random" : False }
+    postdata = json.dumps(params)
+    req = requests.post(MIDLAND_URL, data=postdata)
+    if req.status_code != 200:
+        raise Exception("Failed to load page. Aborting ...")
+    root = json.loads(req.text)
+    return root
 
