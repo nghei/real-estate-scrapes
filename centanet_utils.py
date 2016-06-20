@@ -1,6 +1,10 @@
 import urllib
 import requests
 import json
+import lxml
+import lxml.html
+
+# Centanet
 
 BASE_URL = "http://hk.centanet.com/findproperty/BLL/Result_SearchHandler.ashx"
 SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/"
@@ -8,6 +12,22 @@ COUNT_URL = "http://hk.centanet.com/findproperty/zh-HK/Service/GetBarChartAjax"
 COUNT_SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/"
 
 MIDLAND_URL = ""
+
+
+def get_districts(big_district=None):
+    big_districts = [big_district]
+    if big_district is None:
+        big_districts = ['HK', 'KL', 'NE', 'NW']
+    res = []
+    for bd in big_districts:
+        params = { "type" : "district16", "code" : bd }
+        req = requests.get("http://www1.centadata.com/paddresssearch1.aspx", params=params)
+        if req.status_code != 200:
+            continue
+        root = lxml.html.fromstring(req.text)
+        tables = root.xpath("table[@class='tbreg1']")
+        for table in tables:
+            print(table.text_content())
 
 def get_page(page, posttype="S"):
     subparams = { "posttype" : posttype, "limit" : -1, "currentpage" : page }
