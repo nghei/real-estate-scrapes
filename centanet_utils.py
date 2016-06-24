@@ -49,17 +49,7 @@ def get_districts(big_district=None):
 
 # Orders on market
 
-def get_page(page, posttype="S"):
-    subparams = { "maxprice" : 2000000, "posttype" : posttype, "limit" : -1, "currentpage" : page }
-    suffix_url = "%s?%s" % (SUFFIX_URL, urllib.parse.urlencode(subparams))
-    params = { "url" : suffix_url }
-    req = requests.get(BASE_URL, params=params)
-    if req.status_code != 200:
-        raise Exception("Failed to load page. Aborting ...")
-    root = json.loads(req.text)
-    return root["post"]
-
-def get_pages(posttype="S"):
+def get_page_count(posttype="S"):
     subparams = { "posttype" : posttype }
     count_suffix_url = "%s?%s" % (COUNT_SUFFIX_URL, urllib.parse.urlencode(subparams))
     count_params = { "chartType" : "price", "url" : count_suffix_url }
@@ -69,13 +59,17 @@ def get_pages(posttype="S"):
     root = json.loads(req.text)
     count = sum([x["Cnt"] for x in root["ChartBars"]])
     n_pages = (count - 1) // 10 + 1
-    divs = []
-    for i in range(0, n_pages):
-        try:
-            divs.append(get_page(i + 1, posttype))
-        except:
-            continue
-    return divs
+    return n_pages
+
+def get_page(page, posttype="S"):
+    subparams = { "posttype" : posttype, "limit" : -1, "currentpage" : page }
+    suffix_url = "%s?%s" % (SUFFIX_URL, urllib.parse.urlencode(subparams))
+    params = { "url" : suffix_url }
+    req = requests.get(BASE_URL, params=params)
+    if req.status_code != 200:
+        raise Exception("Failed to load page. Aborting ...")
+    root = json.loads(req.text)
+    return root["post"]
 
 def parse_page_content(content):
     tree = lxml.html.fromstring(content)
@@ -93,12 +87,12 @@ def parse_page_content(content):
             right = right[0]
         else:
             continue
-        header = left.xpath("//*[@class='ContentInfo_Header' and contains(@title, '')]")
-        title = header[0].get("title") if len(header) > 0 else None
+        header = left.xpath(".//*[@class='ContentInfo_Header' and contains(@title, '')]")
+        title = header[0].get("title").strip() if len(header) > 0 else None
         info["title"] = title
         ps = left.xpath("p")
-        for p in ps:
-            s = p.text_content()
+        for x in ps:
+            s = x.text_content()
             info["district"] = s
             break
         sale_price = right.xpath("p/span/span")
@@ -115,15 +109,11 @@ def parse_page_content(content):
             for ps in price_sizes:
                 sizes = ps.xpath("p")
                 for s in sizes:
-                    print(lxml.html.tostring(s))
-                    print(s.text_content())
                     area = get_numeric_part(s.text_content())
                     break
                 prices = ps.xpath("div/div/span")
                 ps = []
                 for p in prices:
-                    print(lxml.html.tostring(p))
-                    print(p.text_content())
                     try:
                          ps.append(get_numeric_part(p.text_content()))
                     except:
@@ -145,7 +135,7 @@ def parse_page_content(content):
                         gross_area = area
                         gross_price = price
             details = i.xpath("*[contains(@class, 'ContentInfo_DetailStr_Lf')]")
-            details = "|".join([d.text_content().strip() for d in details])
+            details = "|".join([d.text_content().strip().replace("\n", "").replace("\r", "") for d in details])
             info["gross_area"] = gross_area
             info["net_area"] = net_area
             info["gross_price"] = gross_price
@@ -153,7 +143,6 @@ def parse_page_content(content):
             info["is_bo"] = is_bo
             info["details"] = details
             break
-        print(info)
         res.append(info)
     return res
 
