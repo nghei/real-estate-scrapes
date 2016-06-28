@@ -1,3 +1,4 @@
+from datetime import datetime
 import urllib
 import requests
 import json
@@ -32,20 +33,145 @@ COUNT_SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/
 
 # Historical transactions
 
-def get_districts(big_district=None):
-    big_districts = [big_district]
-    if big_district is None:
-        big_districts = ['HK', 'KL', 'NE', 'NW']
-    res = []
-    for bd in big_districts:
-        params = { "type" : "district16", "code" : bd }
-        req = requests.get("http://www1.centadata.com/paddresssearch1.aspx", params=params)
-        if req.status_code != 200:
+def get_districts():
+    pass
+
+def get_building_codes(district):
+    pass
+
+def get_building_details(base_cblgcode):
+    params = { "type" : 2, "code" : base_cblgcode }
+    url = "http://estate.centadata.com/pih09/pih09/estate.aspx"
+    req = requests.get(url, params=params)
+    if req.status_code != 200:
+        raise Exception("Failed to load page: %s" % req.url)
+    res = { "address" : None, "school_net" : None, "developer" : None, "start_date" : None, "tower_count" : None, "flat_count" : None }
+    root = lxml.html.fromstring(req.text)
+    tables = root.xpath("//table[@class='tableDesc1']")
+    if len(tables) <= 0:
+        return None
+    table = tables[0]
+    rows = table.xpath("tr")
+    for row in rows:
+        print(lxml.html.tostring(row))
+        print(row.text_content())
+        cols = row.xpath("td")
+        tokens = [c.text_content().strip() for c in cols]
+        if len(tokens) < 2:
             continue
-        root = lxml.html.fromstring(req.text)
-        tables = root.xpath("table[@class='tbreg1']")
-        for table in tables:
-            print(table.text_content())
+        if tokens[0].startswith(u'地址'):
+            res["address"] = tokens[1]
+        elif tokens[0].startswith(u'所屬校網'):
+            res["school_net"] = int(get_numeric(tokens[1]))
+        elif tokens[0].startswith(u'發展商'):
+            res["developer"] = tokens[1]
+        elif tokens[0].startswith(u'入伙日期'):
+            res["start_date"] = datetime.strftime(datetime.strptime(tokens[1], "%m-%Y"), "%Y-%m")
+        elif tokens[0].startswith(u'物業座數'):
+            res["tower_count"] = int(get_numeric(tokens[1]))
+        elif tokens[0].startswith(u'單位總數'):
+            res["flat_count"] = int(tokens[1])
+    return res
+
+def getHistoricalTransactionEstate(base_cblgcode):
+
+    params = { "type" : 1, "code" : base_cblgcode }
+    url = 'http://www1.centadata.com/tfs_centadata/Pih2Sln/TransactionHistory.aspx'
+    r = requests.get(url, params=params)
+    if r.status_code != 200:
+        raise Exception("Failed to load page: %s" % r.url)
+
+    htmlPage = r.text
+    htmlElement = lxml.html.fromstring(htmlPage)
+
+    # find block cblgcode <--
+
+    cblgcodes_links = htmlElement.xpath('//table[@class="unitTran-left-a"]/tr/td/a')
+
+    cblgcodes = []
+
+    for link in cblgcodes_links:
+        ahref = link.get('href')
+        cblgcode = re.search('code=([A-Z]{10})',ahref).group(1)
+        cblgcodes.append(cblgcode)
+
+    url_get_transaction = 'http://www1.centadata.com/tfs_centadata/Pih2Sln/Ajax/AjaxServices.asmx/GenTransactionHistoryPinfo'
+
+    historical_transactions = []
+
+    for cblgcode in cblgcodes:
+        params["code"] = cblgcode
+        r = requests.get(url, params=params)
+
+        htmlPage = r.text
+        htmlElement = lxml.html.fromstring(htmlPage)
+        acodes_links = htmlElement.xpath('//tr[@class="trHasTrans"]')
+
+        # find floor and room acode <-- 
+
+        acodes = [l.get('id') for l in acodes_links]
+
+        for acode in acodes:
+            postInfo = { "acode" : acode, "cblgcode" : cblgcode, "cci_price" : "", "cultureInfo" : "TraditionalChinese" }
+
+            r = requests.post(url_get_transaction, data = postInfo)
+            strings = r.text.encode('utf-8')
+            tree = lxml.etree.fromstring(strings).text
+            htmlElement = lxml.html.fromstring(tree)
+            rows = htmlElement.xpath('//tr')
+
+            flat_name = None
+            net_area = None
+            gross_area = None
+
+            transaction_history = []
+            is_transaction_history = False
+
+            for r in rows:
+                cols = r.xpath("td")
+                tokens = [c.text_content().strip() for c in cols]
+                if len(tokens) <= 0:
+                    continue
+                if len(tokens[0]) <= 0:
+                    continue
+                if tokens[0].startswith(u'屋苑名稱'):
+                    flat_name = tokens[1]
+                elif tokens[0].startswith(u'實用面積'):
+                    try:
+                        net_area = get_numeric(tokens[1])
+                    except:
+                        pass
+                elif tokens[0].startswith(u'建築面積'):
+                    try:
+                        gross_area = get_numeric(tokens[1])
+                    except:
+                        pass
+                elif tokens[0].startswith(u'過往成交紀錄'):
+                    is_transaction_history = True
+                elif tokens[0].startswith(u'筍盤推薦'):
+                    is_transaction_history = False
+                if is_transaction_history:
+                    transaction = {}
+                    transaction["flat_name"] = flat_name
+                    transaction["net_area"] = net_area
+                    transaction["gross_area"] = gross_area
+                    if re.match("[0-9]{2}/[0-9]{2}/[0-9]{2}", tokens[0]):
+                        transaction["date"] = datetime.strftime(datetime.strptime(tokens[0], "%d/%m/%y"), "%Y-%m-%d")
+                        transaction["sale_price"] = get_numeric(tokens[1])
+                        transaction["net_price"] = None
+                        transaction["gross_price"] = None
+                        for t in tokens[2:]:
+                            if u'建' in t:
+                                transaction["gross_price"] = get_numeric(t)
+                            elif u'實' in t:
+                                transaction["net_price"] = get_numeric(t)
+                        transaction_history.append(transaction)
+                    else:
+                        continue
+
+            historical_transactions += transaction_history
+
+    return historical_transactions
 
 # Orders on market
 
