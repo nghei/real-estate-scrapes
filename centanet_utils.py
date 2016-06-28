@@ -33,49 +33,105 @@ COUNT_SUFFIX_URL = "http://hk.centanet.com/findproperty/zh-HK/Home/SearchResult/
 
 # Historical transactions
 
-def get_districts():
-    pass
+def findLinksToEstate():
 
-def get_building_codes(district):
-    pass
+    params = { "type" : 22, "code" : 101 }  # Default values
+    url = "http://hk.centadata.com/paddresssearch1.aspx"
+    r = requests.get(url, params=params)
+    if r.status_code != 200:
+        raise Exception("Failed to load page: %s" % r.url)
 
-def get_building_details(base_cblgcode):
-    params = { "type" : 2, "code" : base_cblgcode }
+    htmlPage = r.text
+    htmlElement = lxml.html.fromstring(htmlPage)
+
+    area_paths = htmlElement.xpath('//*[@id="bar-left"]/div[6]/div/div/a')
+    area_codes = []
+
+    for area_path in area_paths:
+        link = area_path.get('href')
+        p = re.search("""code=([0-9]*)""", link)
+        code = p.group(1)
+        area_codes.append(code)
+
+    url_get_estate = 'http://hk.centadata.com/Ajax/AjaxServices.asmx/paddresssearch1'
+
+    estates = []
+
+    for area_code in area_codes:
+
+        page_index = 1
+        cblgcode_estates = []
+
+        while True:
+            postInfo = {}
+            postInfo['type'] = params["type"]
+            postInfo['code'] = area_code
+            postInfo['pageIndex'] = page_index
+            postInfo['pageSize'] = 30
+            postInfo['columnName'] = 'vol180'
+            postInfo['order'] = 'desc'
+
+            r = requests.post(url_get_estate, data = postInfo)
+            strings = r.text.encode('utf-8')
+            xmlElement = lxml.etree.fromstring(strings)
+            tmp_info = xmlElement.text
+            estates_info = json.loads(tmp_info)
+
+            if len(estates_info['d']) == 0:
+                break
+
+            for estate_info in estates_info['d']:
+                cblgcode_estates.append({ "code": estate_info['code'], "type" : estate_info['type'] })
+
+            page_index += 1
+
+        estates += cblgcode_estates
+
+    return estates
+
+def get_estate_details(base_cblgcode, base_cblgtype):
+    params = { "type" : base_cblgtype, "code" : base_cblgcode }
     url = "http://estate.centadata.com/pih09/pih09/estate.aspx"
     req = requests.get(url, params=params)
     if req.status_code != 200:
         raise Exception("Failed to load page: %s" % req.url)
-    res = { "address" : None, "school_net" : None, "developer" : None, "start_date" : None, "tower_count" : None, "flat_count" : None }
+    details = { "estate_name" : None, "code" : base_cblgcode, "type" : base_cblgtype, "address" : None, "school_net" : None, "developer" : None, "start_date" : None, "tower_count" : None, "flat_count" : None }
     root = lxml.html.fromstring(req.text)
+    try:
+        estate_name = root.xpath("//title")
+        if len(estate_name) > 0:
+            tokens = estate_name[0].text_content().split("-")
+            details["estate_name"] = tokens[-1].strip()
+    except:
+        pass
     tables = root.xpath("//table[@class='tableDesc1']")
     if len(tables) <= 0:
-        return None
+        # No details
+        return details
     table = tables[0]
     rows = table.xpath("tr")
     for row in rows:
-        print(lxml.html.tostring(row))
-        print(row.text_content())
         cols = row.xpath("td")
         tokens = [c.text_content().strip() for c in cols]
         if len(tokens) < 2:
             continue
         if tokens[0].startswith(u'地址'):
-            res["address"] = tokens[1]
+            details["address"] = tokens[1]
         elif tokens[0].startswith(u'所屬校網'):
-            res["school_net"] = int(get_numeric(tokens[1]))
+            details["school_net"] = int(get_numeric(tokens[1]))
         elif tokens[0].startswith(u'發展商'):
-            res["developer"] = tokens[1]
+            details["developer"] = tokens[1]
         elif tokens[0].startswith(u'入伙日期'):
-            res["start_date"] = datetime.strftime(datetime.strptime(tokens[1], "%m-%Y"), "%Y-%m")
+            details["start_date"] = datetime.strftime(datetime.strptime(tokens[1], "%m-%Y"), "%Y-%m")
         elif tokens[0].startswith(u'物業座數'):
-            res["tower_count"] = int(get_numeric(tokens[1]))
+            details["tower_count"] = int(get_numeric(tokens[1]))
         elif tokens[0].startswith(u'單位總數'):
-            res["flat_count"] = int(tokens[1])
-    return res
+            details["flat_count"] = int(tokens[1])
+    return details
 
-def getHistoricalTransactionEstate(base_cblgcode):
+def getHistoricalTransactionEstate(base_cblgcode, base_cblgtype):
 
-    params = { "type" : 1, "code" : base_cblgcode }
+    params = { "type" : base_cblgtype, "code" : base_cblgcode }
     url = 'http://www1.centadata.com/tfs_centadata/Pih2Sln/TransactionHistory.aspx'
     r = requests.get(url, params=params)
     if r.status_code != 200:
@@ -151,7 +207,7 @@ def getHistoricalTransactionEstate(base_cblgcode):
                 elif tokens[0].startswith(u'筍盤推薦'):
                     is_transaction_history = False
                 if is_transaction_history:
-                    transaction = {}
+                    transaction = { "code" : base_cblgcode, "type" : base_cblgtype }
                     transaction["flat_name"] = flat_name
                     transaction["net_area"] = net_area
                     transaction["gross_area"] = gross_area
