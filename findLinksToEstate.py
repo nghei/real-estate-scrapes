@@ -1,0 +1,1 @@
+url = 'http://hk.centadata.com/ptest.aspx?type=22&code=101&ref=CD2_Detail_Nav'
